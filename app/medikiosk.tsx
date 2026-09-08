@@ -72,7 +72,7 @@ export default function MediKiosk(){
  function openCase(v:Visit){setEditing(structuredClone(v));setReviewed(false);go('case');}
  const urgent=needsAttention(answers);
  return <main className="studio">
- <header className="studio-bar"><a className="brand" href="/" aria-label="MediKiosk home"><span className="brand-icon"><HeartPulse/></span>MediKiosk<span className="brand-by">by localdost</span></a><span className="demo-label">INTERACTIVE PROTOTYPE</span></header>
+ <header className="studio-bar"><a className="brand" href="/" aria-label="MediKiosk home"><span className="brand-icon"><HeartPulse/></span>MediKiosk<span className="brand-by">by Jharkhand</span></a><span className="demo-label">INTERACTIVE PROTOTYPE</span></header>
  <div className="studio-body">
  <aside className="studio-aside"><span className="eyebrow">PATIENT EXPERIENCE</span><h1>A little easier.<br/>For everyone.</h1><p>From the waiting room<br/>to a better conversation.</p><div className="aside-note"><Smartphone size={20}/><span>Phone preview<br/><small>Touch, type, or speak.</small></span></div><div className="device-sizes" aria-label="Phone preview size"><button aria-pressed={width===374} onClick={()=>setWidth(374)}>Compact</button><button aria-pressed={width===410} onClick={()=>setWidth(410)}>Standard</button></div></aside>
  <div className="device" style={{width}}><div className="status-bar" aria-hidden="true"><b>9:41</b><span><Signal size={14}/><Wifi size={14}/><BatteryFull size={19}/></span></div>
@@ -146,7 +146,7 @@ export default function MediKiosk(){
  </>}
  </div><nav className="bottom-nav" aria-label={t('Main navigation','मुख्य मेनू')}><button className={!['records','help','staff','case'].includes(screen)?'active':''} aria-current={screen==='home'?'page':undefined} onClick={()=>go('home')}><Home/>{t('Home','होम')}</button><button className={screen==='records'?'active':''} aria-current={screen==='records'?'page':undefined} onClick={()=>go('records')}><FileHeart/>{t('My records','मेरे रिकॉर्ड')}</button><button className={screen==='help'?'active':''} aria-current={screen==='help'?'page':undefined} onClick={()=>go('help')}><CircleHelp/>{t('Help','मदद')}</button></nav></div><div className="home-indicator"/></div>
  <aside className="studio-right"><span className="eyebrow">DESIGNED AROUND PEOPLE</span><div className="journey-item"><b>01</b><span>Your language<small>Feel at home from the start.</small></span></div><div className="journey-item"><b>02</b><span>Your own words<small>One simple question at a time.</small></span></div><div className="journey-item"><b>03</b><span>Ready for the doctor<small>A history, reviewed by staff.</small></span></div><p className="prototype-note">Demo only · Use sample details.<br/>No real hospital is connected.</p><button className="desktop-staff" onClick={()=>go('staff')}><Stethoscope size={16}/> Explore staff desk <ArrowRight size={16}/></button></aside>
- </div><footer className="studio-footer"><span>LOCALDOST : 3000</span><span>Made for the way India speaks.</span><span>SIH 2026</span></footer></main>;
+ </div><footer className="studio-footer"><span>JHARKHAND</span><span>Made for the way India speaks.</span><span>SIH 2026</span></footer></main>;
 }
 
 
