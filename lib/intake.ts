@@ -2,7 +2,7 @@ export type Pair = [string,string];
 export type Answers = Record<string,string>;
 export type Question = {id:string; title:Pair; hint?:Pair; choices?:Pair[]};
 export type Visit = {
- id:string; patientId:string; name:string; age:string; mode:'opd'|'ayush'; language:'hi'|'en';
+ id:string; patientId:string; name:string; age:string; address?:string; doctorId?:string; mode:'opd'|'ayush'; language:'hi'|'en'|'bn'|'or';
  answers:Answers; date:string; consentAt:string; status:'draft'|'reviewed'; summary:string;
  history:string; notes:string; diagnosis:string; prescription:string; reviewer:string;
  assessment:Answers; urgent:boolean;

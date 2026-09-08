@@ -1,152 +1,1317 @@
 'use client';
-import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { ArrowRight, ArrowLeft, HeartPulse, Home, FileHeart, CircleHelp, Volume2, ShieldCheck, Stethoscope, Smartphone, Signal, BatteryFull, Wifi, Mic, MicOff, Check, CheckCircle2, ClipboardList, UserRound, AlertTriangle, Download, Trash2, X, ChevronRight } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import {
+  HeartPulse,
+  UserRound,
+  Stethoscope,
+  Mic,
+  MicOff,
+  Volume2,
+  ArrowLeft,
+  ArrowRight,
+  Check,
+  Home,
+  FileHeart,
+  LogOut,
+  Download,
+  AlertTriangle,
+  Plus,
+} from 'lucide-react';
 import { Checkbox } from '@/components/ui/checkbox';
-import { AlertDialog, AlertDialogContent, AlertDialogTitle, AlertDialogDescription, AlertDialogCancel, AlertDialogAction } from '@/components/ui/alert-dialog';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
-import { Progress } from '@/components/ui/progress';
-import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
-import { questions, getQuestions, needsAttention, makeSummary, orderVisits, assessmentFields, type Visit, type Answers, type Pair } from '@/lib/intake';
-
-type Screen='home'|'consent'|'profile'|'intake'|'review'|'ticket'|'records'|'help'|'staff'|'case';
-type SpeechResult={results:ArrayLike<ArrayLike<{transcript:string}>>};
-type Recognition={lang:string;continuous:boolean;interimResults:boolean;onresult:((e:SpeechResult)=>void)|null;onerror:((e:{error:string})=>void)|null;onend:(()=>void)|null;start:()=>void;stop:()=>void;abort:()=>void};
-type SpeechWindow=Window & {SpeechRecognition?:new()=>Recognition;webkitSpeechRecognition?:new()=>Recognition};
-const STORE='medikiosk-demo-visits-v1';
-const SAMPLE:Visit={id:'visit-sample',patientId:'DEMO-1042',name:'Meena Devi',age:'42',mode:'opd',language:'hi',answers:{complaint:'घुटने में दर्द / Knee pain',safety:'Neither of these',onset:'More than a week ago',site:'Right knee',character:'Aching',radiation:'No',associated:'Nothing else',timing:'Comes and goes',triggers:'Worse after walking',severity:'Moderate · Some tasks are difficult',medicines:'I do not know the names',allergies:'Not sure',history:'No known conditions'},date:'2026-09-07T09:15:00.000Z',consentAt:'2026-09-07T09:10:00.000Z',status:'draft',summary:'',history:'Sample record: previous consultation for knee discomfort. Source document has not been verified.',notes:'',diagnosis:'',prescription:'',reviewer:'',assessment:{},urgent:false};
-SAMPLE.summary=makeSummary(SAMPLE);
-
-function Choice({hi,value,onChange,options}:{hi:boolean;value:string;onChange:(s:string)=>void;options:Pair[]}){return <RadioGroup className="choice-list" value={value} onValueChange={v=>onChange(String(v))}>{options.map(p=><label className={'choice '+(value===p[1]?'selected':'')} key={p[1]}><RadioGroupItem value={p[1]}/><span>{p[hi?0:1]}</span></label>)}</RadioGroup>;}
-
-export default function MediKiosk(){
- const [hi,setHi]=useState(true),[screen,setScreen]=useState<Screen>('home'),[width,setWidth]=useState(410);
- const [consent,setConsent]=useState(false),[voiceConsent,setVoiceConsent]=useState(false),[consentAt,setConsentAt]=useState('');
- const [name,setName]=useState(''),[age,setAge]=useState(''),[patientId,setPatientId]=useState(''),[mode,setMode]=useState<'opd'|'ayush'>('opd');
- const [answers,setAnswers]=useState<Answers>({}),[index,setIndex]=useState(0),[visits,setVisits]=useState<Visit[]>([]),[currentId,setCurrentId]=useState('');
- const [editing,setEditing]=useState<Visit|null>(null),[reviewed,setReviewed]=useState(false),[message,setMessage]=useState(''),[loaded,setLoaded]=useState(false);
- const [listening,setListening]=useState(false),[speaking,setSpeaking]=useState(false),[confirmDelete,setConfirmDelete]=useState(false);
- const panel=useRef<HTMLDivElement>(null),speech=useRef<Recognition|null>(null);
- const t=(en:string,hindi:string)=>hi?hindi:en;
- const pair=(p:Pair)=>p[hi?0:1];
- const qs=getQuestions(mode,answers),question=qs[index],active=visits.find(v=>v.id===currentId);
- useEffect(()=>{try{const saved=localStorage.getItem(STORE);if(saved){const data=JSON.parse(saved);if(Array.isArray(data)&&data.every(v=>typeof v.id==='string'&&v.answers&&typeof v.date==='string'))setVisits(data);}}catch{setMessage('Saved demo records could not be opened. You can start a new visit.');}setLoaded(true);},[]);
- useEffect(()=>{document.documentElement.lang=hi?'hi':'en';},[hi]);
- useEffect(()=>{setReviewed(false);},[editing]);
- useEffect(()=>{panel.current?.scrollTo({top:0});speech.current?.abort();setListening(false);if('speechSynthesis' in window)window.speechSynthesis.cancel();setSpeaking(false);},[screen,index]);
- useEffect(()=>()=>{speech.current?.abort();if('speechSynthesis'in window)window.speechSynthesis.cancel();},[]);
- function go(s:Screen){setScreen(s);setMessage('');}
- function saveVisits(next:Visit[]){setVisits(next);try{localStorage.setItem(STORE,JSON.stringify(next));return true;}catch{setMessage(t('Saved for this session only. Browser storage is unavailable.','सिर्फ इस सत्र के लिए सेव हुआ। ब्राउज़र में सेव नहीं हो पाया।'));return false;}}
- function startNew(){setConsent(false);setVoiceConsent(false);setConsentAt('');setName('');setAge('');setPatientId('');setAnswers({});setIndex(0);setMode('opd');setCurrentId('');go('consent');}
- function speak(text:string){
-  if(!('speechSynthesis'in window)){setMessage(t('Audio is unavailable in this browser. Please read or ask someone to help.','इस ब्राउज़र में आवाज़ उपलब्ध नहीं है। पढ़ें या किसी की मदद लें।'));return;}
-  if(speaking){window.speechSynthesis.cancel();setSpeaking(false);return;}
-  window.speechSynthesis.cancel();const utterance=new SpeechSynthesisUtterance(text);utterance.lang=hi?'hi-IN':'en-IN';utterance.rate=.85;
-  const voice=window.speechSynthesis.getVoices().find(v=>v.lang.startsWith(hi?'hi':'en'));if(voice)utterance.voice=voice;
-  utterance.onend=()=>setSpeaking(false);utterance.onerror=()=>{setSpeaking(false);setMessage(t('Audio could not play. You can continue by reading.','आवाज़ नहीं चल सकी। आप पढ़कर आगे बढ़ सकते हैं।'));};setSpeaking(true);window.speechSynthesis.speak(utterance);
- }
- function dictate(){
-  if(listening){speech.current?.stop();return;}
-  if(!voiceConsent){setMessage(t('Enable optional voice permission on the consent screen, or type your answer.','सहमति वाले पन्ने पर आवाज़ की अनुमति दें, या जवाब लिखें।'));return;}
-  const Ctor=(window as SpeechWindow).SpeechRecognition||(window as SpeechWindow).webkitSpeechRecognition;
-  if(!Ctor){setMessage(t('Voice typing is unavailable here. Use the buttons or type below.','यहाँ बोलकर लिखना उपलब्ध नहीं है। बटन चुनें या नीचे लिखें।'));return;}
-  if('speechSynthesis'in window)window.speechSynthesis.cancel();
-  const r=new Ctor();speech.current=r;r.lang=hi?'hi-IN':'en-IN';r.continuous=false;r.interimResults=false;
-  const qid=question.id;r.onresult=e=>{setAnswers(a=>({...a,[qid]:e.results[0][0].transcript}));setMessage(t('Please check the words before continuing.','आगे बढ़ने से पहले लिखे हुए शब्द जांच लें।'));};
-  r.onerror=e=>{setListening(false);setMessage(e.error==='not-allowed'?t('Microphone permission was not granted. You can type instead.','माइक की अनुमति नहीं मिली। आप लिखकर जवाब दे सकते हैं।'):t('Could not hear that. Try again or type your answer.','आवाज़ समझ नहीं आई। फिर बोलें या लिखें।'));};r.onend=()=>setListening(false);
-  try{r.start();setListening(true);setMessage('');}catch{setMessage(t('Microphone is busy. Please type your answer.','माइक उपलब्ध नहीं है। कृपया जवाब लिखें।'));}
- }
- function submit(){
-  if(!consent||!name.trim()||Number(age)<1||Number(age)>120||!answers.complaint?.trim()||!answers.safety)return;
-  const id=crypto.randomUUID(),date=new Date().toISOString();
-  const visit:Visit={id,patientId:patientId||'DEMO-'+id.slice(0,6).toUpperCase(),name:name.trim(),age,mode,language:hi?'hi':'en',answers:{...answers},date,consentAt,status:'draft',summary:'',history:'',notes:'',diagnosis:'',prescription:'',reviewer:'',assessment:{},urgent:needsAttention(answers)};
-  visit.summary=makeSummary(visit);go('ticket');saveVisits([visit,...visits]);setCurrentId(id);
- }
- function download(v:Visit){
-  const text=[`MediKiosk — ${v.status.toUpperCase()} DEMO RECORD`,`Patient ID: ${v.patientId}`,`Visit: ${new Date(v.date).toLocaleString()}`,v.summary,`Prior history (staff entered): ${v.history||'Not entered'}`,`Clinician notes: ${v.notes||'Not entered'}`,`Diagnosis (clinician entered): ${v.diagnosis||'Not entered'}`,`Prescription (clinician entered): ${v.prescription||'Not entered'}`,...Object.entries(v.assessment).map(([k,val])=>`${k}: ${val}`),`Reviewer: ${v.reviewer||'Not reviewed'}`,'DEMONSTRATION ONLY — no real hospital or ABHA integration'].join('\n\n');
-  const url=URL.createObjectURL(new Blob([text],{type:'text/plain;charset=utf-8'}));const a=document.createElement('a');a.href=url;a.download=`MediKiosk-${v.patientId}.txt`;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
- }
- const Listen=({text}:{text:string})=><button className="listen-button" onClick={()=>speak(text)}><Volume2 size={20}/>{speaking?t('Stop audio','आवाज़ रोकें'):t('Tap to listen','सुनने के लिए दबाएं')}</button>;
- const Back=({to}:{to:Screen})=><button className="back-link" onClick={()=>go(to)}><ArrowLeft size={18}/>{t('Back','पीछे')}</button>;
- const Heading=({icon,title,desc}:{icon?:ReactNode;title:string;desc?:string})=><><div className="page-icon">{icon||<ClipboardList/>}</div><h2 className="inner-title">{title}</h2>{desc&&<p className="intro">{desc}</p>}</>;
- function answerLabel(id:string,value:string){return pair([...questions,...getQuestions('ayush',answers)].find(q=>q.id===id)?.choices?.find(p=>p[1]===value)||[value,value]);}
- function openCase(v:Visit){setEditing(structuredClone(v));setReviewed(false);go('case');}
- const urgent=needsAttention(answers);
- return <main className="studio">
- <header className="studio-bar"><a className="brand" href="/" aria-label="MediKiosk home"><span className="brand-icon"><HeartPulse/></span>MediKiosk<span className="brand-by">by Jharkhand</span></a><span className="demo-label">INTERACTIVE PROTOTYPE</span></header>
- <div className="studio-body">
- <aside className="studio-aside"><span className="eyebrow">PATIENT EXPERIENCE</span><h1>A little easier.<br/>For everyone.</h1><p>From the waiting room<br/>to a better conversation.</p><div className="aside-note"><Smartphone size={20}/><span>Phone preview<br/><small>Touch, type, or speak.</small></span></div><div className="device-sizes" aria-label="Phone preview size"><button aria-pressed={width===374} onClick={()=>setWidth(374)}>Compact</button><button aria-pressed={width===410} onClick={()=>setWidth(410)}>Standard</button></div></aside>
- <div className="device" style={{width}}><div className="status-bar" aria-hidden="true"><b>9:41</b><span><Signal size={14}/><Wifi size={14}/><BatteryFull size={19}/></span></div>
- <div className="phone-app"><header className="app-header"><div className="brand"><span className="brand-icon"><HeartPulse/></span><span>MediKiosk<small>{t('Your health companion','आपका स्वास्थ्य साथी')}</small></span></div><button className="language-small" onClick={()=>setHi(!hi)} aria-label={t('Switch to Hindi','अंग्रेज़ी में बदलें')}>{hi?'English':'हिन्दी'}</button></header>
- <div className="page-content" ref={panel}>
- {message&&<div className="notice" role="status"><span>{message}</span><button aria-label={t('Dismiss message','संदेश हटाएं')} onClick={()=>setMessage('')}><X size={17}/></button></div>}
- {screen==='home'&&<>
- <div className="clinic-line"><span className="live-dot"/>{t('OPD · Patient assistance','ओपीडी • मरीज सहायता')}</div><h2>{t('Namaste.','नमस्ते।')}<br/>{t('Let’s talk about your health.','अपनी सेहत की बात करें।')}</h2><p className="intro">{t('Tell us what brings you in, before you see the doctor.','डॉक्टर से मिलने से पहले, अपनी परेशानी बताएं।')}</p>
- <Listen text={t('Welcome to MediKiosk. Choose your language, then tap Start my visit. You can answer simple questions by touch or voice.','मेडीकियोस्क में आपका स्वागत है। अपनी भाषा चुनें, फिर शुरू करें दबाएं। आप आसान सवालों के जवाब बटन दबाकर या बोलकर दे सकते हैं।')}/>
- <div className="language-section"><p>{t('Choose your language','अपनी भाषा चुनें')}</p><RadioGroup className="language-grid" value={hi?'hi':'en'} onValueChange={v=>setHi(v==='hi')}><label className={'language-card '+(hi?'selected':'')}><RadioGroupItem value="hi"/><span>हिन्दी<small>Hindi</small></span></label><label className={'language-card '+(!hi?'selected':'')}><RadioGroupItem value="en"/><span>English<small>अंग्रेज़ी</small></span></label></RadioGroup></div>
- <button className="primary start-button" onClick={()=>{if(consent && name.trim() && Number(age)>=1 && Number(age)<=120 && !currentId)go('intake');else startNew();}}>{consent && name.trim() && Number(age)>=1 && Number(age)<=120 && !currentId?t('Continue my visit','जानकारी पूरी करें'):t('Start my visit','शुरू करें')}<ArrowRight/></button><div className="reassurance"><ShieldCheck size={21}/><span>{t('Your story, ready for your doctor.','आपकी बात, आपके डॉक्टर तक।')}<small>{t('This does not replace medical advice.','यह डॉक्टर की सलाह का विकल्प नहीं है।')}</small></span></div><button className="staff-link" onClick={()=>go('staff')}><Stethoscope size={17}/>{t('For clinic staff','स्टाफ के लिए')}<ArrowRight size={16}/></button><p className="demo-inline">{t('Demo only · Please use sample details.','सिर्फ डेमो • कृपया काल्पनिक जानकारी भरें।')}</p>
- </>}
- {screen==='consent'&&<>
- <Back to="home"/><Heading icon={<ShieldCheck/>} title={t('First, your permission.','पहले, आपकी अनुमति।')} desc={t('This demo helps prepare your story for a clinic visit.','यह डेमो डॉक्टर से मिलने के लिए आपकी जानकारी तैयार करता है।')}/>
- <div className="plain-list"><p><Check/>{t('Your answers become a draft for staff to review.','आपके जवाबों की जानकारी स्टाफ जांचेगा।')}</p><p><Smartphone/>{t('Demo records stay in this browser. Anyone using this browser can open them.','डेमो रिकॉर्ड इसी ब्राउज़र में रहेंगे। इसे इस्तेमाल करने वाला कोई भी इन्हें देख सकता है।')}</p><p><Trash2/>{t('Delete them anytime in My records. Do not enter real health or Aadhaar details.','मेरे रिकॉर्ड से कभी भी मिटाएं। असली स्वास्थ्य या आधार जानकारी न भरें।')}</p></div>
- <Listen text={t('Your answers will be stored in this browser for this demonstration. Do not enter real health or Aadhaar details. You can delete records at any time. Voice typing is optional and your browser provider may process audio online.','इस डेमो में आपके जवाब इसी ब्राउज़र में रखे जाएंगे। असली स्वास्थ्य या आधार जानकारी न भरें। आप रिकॉर्ड कभी भी मिटा सकते हैं। बोलकर लिखना वैकल्पिक है। ब्राउज़र सेवा आपकी आवाज़ ऑनलाइन प्रोसेस कर सकती है।')}/>
- <label className="consent-row"><Checkbox checked={consent} onCheckedChange={v=>setConsent(!!v)}/><span>{t('I agree to use sample details in this demo.','मैं इस डेमो में काल्पनिक जानकारी देने के लिए सहमत हूँ।')}</span></label><label className="consent-row"><Checkbox checked={voiceConsent} onCheckedChange={v=>setVoiceConsent(!!v)}/><span>{t('Allow optional voice typing','बोलकर लिखने की अनुमति दें (वैकल्पिक)')}<small>{t('Audio may be processed online by your browser provider. MediKiosk does not save recordings.','ब्राउज़र सेवा आवाज़ ऑनलाइन प्रोसेस कर सकती है। MediKiosk रिकॉर्डिंग सेव नहीं करता।')}</small></span></label>
- <button className="primary spaced" disabled={!consent} onClick={()=>{setConsentAt(new Date().toISOString());go('profile');}}>{t('I agree, continue','सहमत हूँ, आगे बढ़ें')}<ArrowRight size={20}/></button><button className="text-button" onClick={()=>{setConsent(false);setVoiceConsent(false);go('home');}}>{t('Not now','अभी नहीं')}</button>
- </>}
- {screen==='profile'&&<>
- <Back to="consent"/><Heading icon={<UserRound/>} title={t('A little about you.','आपके बारे में।')} desc={t('Use a sample name and age to try the visit.','डेमो देखने के लिए काल्पनिक नाम और उम्र भरें।')}/>
- <form onSubmit={e=>{e.preventDefault();setIndex(0);go('intake');}}>
- {visits.length>0&&<details className="details-block"><summary>{t('Returning demo patient?','पुराना डेमो मरीज?')}</summary>{Array.from(new Map(visits.map(v=>[v.patientId,v])).values()).map(v=><button type="button" className="record-select" key={v.patientId} onClick={()=>{setPatientId(v.patientId);setName(v.name);setAge(v.age);}}><UserRound size={18}/>{v.name}<small>{v.patientId}</small></button>)}</details>}
- <label className="field">{t('Your name','आपका नाम')}<input autoComplete="off" maxLength={60} required value={name} placeholder={t('e.g. Meena Devi','जैसे, मीना देवी')} onChange={e=>{setName(e.target.value);setPatientId('');}}/></label><label className="field">{t('Age in years','उम्र (साल)')}<input inputMode="numeric" type="number" min="1" max="120" required value={age} placeholder="42" onChange={e=>setAge(e.target.value)}/></label>
- <p className="field-label">{t('Which clinic are you visiting?','किस विभाग में दिखाना है?')}</p><RadioGroup className="choice-list" value={mode} onValueChange={v=>setMode(v as 'opd'|'ayush')}><label className={'choice '+(mode==='opd'?'selected':'')}><RadioGroupItem value="opd"/><Stethoscope size={22}/>{t('General OPD','सामान्य ओपीडी')}</label><label className={'choice '+(mode==='ayush'?'selected':'')}><RadioGroupItem value="ayush"/>{t('Ayurveda / AYUSH','आयुर्वेद / आयुष')}</label></RadioGroup>
- <p className="fineprint">{patientId||t('A demo patient ID will be created. No Aadhaar needed.','डेमो मरीज ID बन जाएगी। आधार की ज़रूरत नहीं।')}</p><button className="primary spaced" type="submit" disabled={!name.trim()||Number(age)<1||Number(age)>120}>{t('Tell us what’s wrong','अपनी परेशानी बताएं')}<ArrowRight size={20}/></button>
- </form></>}
- {screen==='intake'&&question&&<>
- <div className="step-top"><button className="back-link" onClick={()=>{if(index===0)go('profile');else setIndex(index-1);}}><ArrowLeft size={18}/>{t('Back','पीछे')}</button><span>{index+1} / {qs.length}</span></div><Progress className="intake-progress" value={(index+1)/qs.length*100} aria-label={t('Visit progress','जानकारी की प्रगति')}/><div className="question-eyebrow">{mode==='ayush'?t('AYUSH visit','आयुष की जानकारी'):t('Your health story','आपकी सेहत की बात')}</div><h2 className="question-title">{pair(question.title)}</h2>{question.hint&&<p className="intro">{pair(question.hint)}</p>}<Listen text={pair(question.title)+' '+(question.hint?pair(question.hint):'')}/>
- {question.choices&&<Choice hi={hi} value={answers[question.id]||''} onChange={value=>{setAnswers(a=>({...a,[question.id]:value}));setMessage('');}} options={question.choices}/>}
- {question.id!=='safety'&&<><label className="field answer-field">{t('Or tell us in your own words','या अपने शब्दों में बताएं')}<textarea rows={3} maxLength={1200} value={answers[question.id]==='Not provided'?'':answerLabel(question.id,answers[question.id]||'')} onChange={e=>setAnswers(a=>({...a,[question.id]:e.target.value}))} placeholder={t('Write your answer here…','यहाँ अपना जवाब लिखें…')}/></label><button className={'voice-button '+(listening?'listening':'')} onClick={dictate}>{listening?<MicOff size={22}/>:<Mic size={22}/>}<span>{listening?t('Listening… tap to stop','सुन रहे हैं… रोकने के लिए दबाएं'):t('Tap and speak','दबाएं और बोलें')}</span></button></>}
- {urgent&&<div className="urgent-notice" role="alert"><AlertTriangle/><div><b>{t('Please speak to clinic staff now.','कृपया अभी क्लिनिक स्टाफ को बताएं।')}</b><p>{t('Do not wait to finish this form. This demo cannot contact staff or emergency services.','फ़ॉर्म पूरा होने का इंतज़ार न करें। यह डेमो स्टाफ या इमरजेंसी सेवा से संपर्क नहीं कर सकता।')}</p></div></div>}
- <button className="primary spaced" disabled={!answers[question.id]?.trim()} onClick={()=>{if(index<qs.length-1)setIndex(index+1);else go('review');}}>{index===qs.length-1?t('Check my answers','मेरे जवाब जांचें'):t('Continue','आगे बढ़ें')}<ArrowRight size={20}/></button>{question.id!=='complaint'&&question.id!=='safety'&&<button className="text-button" onClick={()=>{setAnswers(a=>({...a,[question.id]:'Not provided'}));if(index<qs.length-1)setIndex(index+1);else go('review');}}>{t('Skip this question','यह सवाल छोड़ें')}</button>}
- </>}
- {screen==='review'&&<>
- <Back to="intake"/><Heading icon={<ClipboardList/>} title={t('Did we get that right?','क्या यह जानकारी सही है?')} desc={t('Check your answers. You can change anything.','अपने जवाब देखें। आप कोई भी जवाब बदल सकते हैं।')}/><div className="patient-strip"><UserRound/><div><b>{name}</b><small>{age} {t('years','साल')} · {mode==='ayush'?'AYUSH':'OPD'}</small></div></div>
- {qs.map((q,i)=><div className="answer-review" key={q.id}><div><small>{pair(q.title)}</small><p>{answers[q.id]==='Not provided'?t('Skipped','छोड़ा गया'):answerLabel(q.id,answers[q.id]||'Not provided')}</p></div><button onClick={()=>{setIndex(i);go('intake');}}>{t('Edit','बदलें')}</button></div>)}<button className="primary spaced" onClick={submit}>{t('Save for staff review','स्टाफ की जांच के लिए सेव करें')}<Check size={20}/></button><p className="fineprint">{t('Saved only in this browser. No real clinic is notified.','सिर्फ इसी ब्राउज़र में सेव होगा। असली क्लिनिक को नहीं भेजा जाएगा।')}</p>
- </>}
- {screen==='ticket'&&active&&<>
- <div className="success-icon"><CheckCircle2 size={40}/></div><h2 className="inner-title">{t('Your story is ready.','आपकी जानकारी तैयार है।')}</h2><p className="intro">{active.status==='reviewed'?t('Your demo visit has been reviewed.','आपकी डेमो विज़िट की जांच हो गई है।'):t('Your demo visit is saved for staff review.','आपकी डेमो विज़िट स्टाफ की जांच के लिए सेव हो गई है।')}</p><div className="ticket"><span className="eyebrow">{t('DEMO PATIENT ID','डेमो मरीज ID')}</span><h3>{active.patientId}</h3><p>{active.name} · {active.age} {t('years','साल')}</p><div className="ticket-line"/><span className={'badge '+(active.urgent?'urgent':'')}>{active.status==='reviewed'?t('Reviewed','जांच हुई'):active.urgent?t('Needs prompt staff attention','जल्द स्टाफ की जांच ज़रूरी'):t('Awaiting staff review','स्टाफ की जांच बाकी')}</span></div>
- <details className="details-block"><summary>{t('See my answers and visit notes','मेरे जवाब और विज़िट की जानकारी देखें')}</summary>{getQuestions(active.mode,active.answers).map(q=><div className="answer-review" key={q.id}><div><small>{pair(q.title)}</small><p>{answerLabel(q.id,active.answers[q.id]||t('Not provided','नहीं बताया'))}</p></div></div>)}{active.status==='reviewed'&&<div className="history-text"><b>{t('Staff-reviewed notes','स्टाफ द्वारा जांची गई जानकारी')}</b><p>{active.notes||t('No examination notes added.','जांच की टिप्पणी नहीं जोड़ी गई।')}</p><p>{active.diagnosis}</p><p>{active.prescription}</p><p>{t('Reviewed by','जांचकर्ता')}: {active.reviewer}</p></div>}</details>{active.urgent&&<div className="urgent-notice"><AlertTriangle/><p>{t('Tell clinic staff now. This demo sends no real alert.','अभी क्लिनिक स्टाफ को बताएं। इस डेमो से असली सूचना नहीं जाती।')}</p></div>}<div className="next-step"><span>1</span><p>{t('Show this visit to clinic staff.','यह जानकारी क्लिनिक स्टाफ को दिखाएं।')}</p></div><div className="next-step"><span>2</span><p>{t('Staff checks your answers before the doctor’s visit.','डॉक्टर से मिलने से पहले स्टाफ आपके जवाब जांचेगा।')}</p></div><button className="primary spaced" onClick={()=>go('records')}><FileHeart size={20}/>{t('See my records','मेरे रिकॉर्ड देखें')}</button><button className="secondary spaced" onClick={()=>openCase(active)}><Stethoscope size={19}/>{t('Try staff review','स्टाफ की जांच का डेमो देखें')}</button>
- </>}
- {screen==='records'&&<>
- <Heading icon={<FileHeart/>} title={t('My records','मेरे रिकॉर्ड')} desc={t('Demo visits saved on this browser.','इस ब्राउज़र में सेव की गई डेमो विज़िट।')}/>
- {!loaded?<p className="intro">{t('Opening records…','रिकॉर्ड खुल रहे हैं…')}</p>:visits.length===0?<div className="empty-state"><FileHeart size={38}/><h3>{t('No visits yet','अभी कोई रिकॉर्ड नहीं')}</h3><p>{t('Your saved visits will appear here.','आपकी सेव की गई जानकारी यहाँ दिखेगी।')}</p><button className="primary spaced" onClick={startNew}>{t('Start my visit','शुरू करें')}<ArrowRight size={20}/></button></div>:<>
- {visits.map(v=><article className="visit-card" key={v.id}><div className="card-row"><b>{v.name}</b><span className={'badge '+(v.urgent?'urgent':'')}>{v.status==='reviewed'?t('Reviewed','जांच हुई'):t('Draft','जांच बाकी')}</span></div><p>{v.patientId} · {new Date(v.date).toLocaleDateString(hi?'hi-IN':'en-IN')}</p><h3>{answerLabel('complaint',v.answers.complaint)}</h3><div className="card-actions"><button onClick={()=>{setCurrentId(v.id);go('ticket');}}>{t('Open visit','विज़िट देखें')}<ChevronRight size={17}/></button><button onClick={()=>download(v)} aria-label={t('Download visit','विज़िट डाउनलोड करें')}><Download size={19}/></button></div></article>)}
- <button className="secondary spaced" onClick={startNew}><ArrowRight size={18}/>{t('Start another visit','नई विज़िट शुरू करें')}</button><button className="text-button danger-text" onClick={()=>setConfirmDelete(true)}><Trash2 size={16}/>{t('Delete all demo records','सभी डेमो रिकॉर्ड मिटाएं')}</button><AlertDialog open={confirmDelete} onOpenChange={setConfirmDelete}><AlertDialogContent className="delete-dialog"><AlertDialogTitle>{t('Delete all demo records?','सभी डेमो रिकॉर्ड मिटाएं?')}</AlertDialogTitle><AlertDialogDescription>{t('This removes all visits from this browser. This cannot be undone.','इस ब्राउज़र की सभी विज़िट मिट जाएंगी। वे वापस नहीं आएंगी।')}</AlertDialogDescription><AlertDialogCancel className="secondary">{t('Keep records','रिकॉर्ड रखें')}</AlertDialogCancel><AlertDialogAction className="danger-button" onClick={()=>{saveVisits([]);setEditing(null);setCurrentId('');setConfirmDelete(false);}}>{t('Yes, delete all','हाँ, सभी मिटाएं')}</AlertDialogAction></AlertDialogContent></AlertDialog>
- </>}
- </>}
- {screen==='help'&&<>
- <Heading icon={<CircleHelp/>} title={t('A helping hand.','थोड़ी मदद।')} desc={t('Go at your own pace. Ask someone you trust to help if needed.','आराम से जवाब दें। ज़रूरत हो तो किसी भरोसेमंद व्यक्ति की मदद लें।')}/><Listen text={t('Tap the large buttons to answer. Tap the speaker to hear a question. Tap the microphone to speak, or type. If you are very unwell, tell clinic staff now. This demo cannot call for help.','जवाब देने के लिए बड़े बटन दबाएं। सवाल सुनने के लिए स्पीकर दबाएं। बोलने के लिए माइक दबाएं या लिखें। अगर बहुत तकलीफ है, अभी क्लिनिक स्टाफ को बताएं। यह डेमो मदद नहीं बुला सकता।')}/>
- <div className="help-item"><Volume2/><div><h3>{t('Listen to the question','सवाल सुनें')}</h3><p>{t('Tap the speaker. Audio depends on the voices available on your device.','स्पीकर दबाएं। आवाज़ आपके फ़ोन में उपलब्ध भाषा पर निर्भर है।')}</p></div></div><div className="help-item"><Mic/><div><h3>{t('Speak or type','बोलें या लिखें')}</h3><p>{t('Voice needs browser support, permission, and sometimes internet. Touch and typing always remain available.','आवाज़ के लिए ब्राउज़र का समर्थन, अनुमति और कभी-कभी इंटरनेट चाहिए। बटन और लिखने की सुविधा उपलब्ध रहेगी।')}</p></div></div><div className="help-item"><ShieldCheck/><div><h3>{t('You stay in control','आपकी अनुमति ज़रूरी है')}</h3><p>{t('Answers are turned into a draft, not a diagnosis. A clinician must review them.','जवाबों से सिर्फ जानकारी का मसौदा बनता है, बीमारी का निदान नहीं। डॉक्टर की जांच ज़रूरी है।')}</p></div></div>
- <div className="urgent-notice"><AlertTriangle/><div><b>{t('Need urgent help?','अभी मदद चाहिए?')}</b><p>{t('For severe breathing trouble or new severe chest pain, speak to clinic staff immediately. Do not wait for this form.','सांस की बहुत तकलीफ या सीने में नया तेज़ दर्द हो तो तुरंत स्टाफ को बताएं। इस फ़ॉर्म का इंतज़ार न करें।')}</p></div></div><p className="fineprint">{t('Demo safety guidance reference:','डेमो सुरक्षा जानकारी का संदर्भ:')} <a href="https://www.nhs.uk/symptoms/shortness-of-breath/" target="_blank" rel="noreferrer">NHS</a></p><button className="secondary spaced" onClick={()=>go('staff')}><Stethoscope size={20}/>{t('Open staff demo','स्टाफ डेमो खोलें')}</button>
- </>}
- {screen==='staff'&&<>
- <Back to="home"/><Heading icon={<Stethoscope/>} title={t('Staff desk','स्टाफ डेस्क')} desc={t('Review patient histories before consultation.','परामर्श से पहले मरीज की जानकारी जांचें।')}/><div className="demo-banner">{t('Demo workspace · No staff sign-in or real hospital connection.','डेमो कार्यक्षेत्र • असली स्टाफ लॉगिन या अस्पताल का कनेक्शन नहीं।')}</div>
- <Tabs defaultValue="waiting" className="staff-tabs"><TabsList className="staff-tab-list"><TabsTrigger value="waiting">{t('To review','जांच बाकी')} ({visits.filter(v=>v.status==='draft').length})</TabsTrigger><TabsTrigger value="done">{t('Reviewed','जांच हुई')} ({visits.filter(v=>v.status==='reviewed').length})</TabsTrigger></TabsList>
- {(['waiting','done'] as const).map(tab=><TabsContent key={tab} value={tab}>{orderVisits(visits).filter(v=>v.status===(tab==='waiting'?'draft':'reviewed')).map(v=><button className={'queue-card '+(v.urgent?'priority-card':'')} key={v.id} onClick={()=>openCase(v)}><div className="card-row"><b>{v.name}</b><ChevronRight size={20}/></div><small>{v.patientId} · {v.age} {t('years','साल')} · {v.mode.toUpperCase()}</small><p>{answerLabel('complaint',v.answers.complaint)}</p><span className={'badge '+(v.urgent?'urgent':'')}>{v.urgent?t('Priority · needs assessment','प्राथमिकता • जांच ज़रूरी'):t('Urgency not assessed','गंभीरता की जांच बाकी')}</span></button>)}{visits.filter(v=>v.status===(tab==='waiting'?'draft':'reviewed')).length===0&&<p className="empty-copy">{tab==='waiting'?t('No histories waiting for review.','जांच के लिए अभी कोई जानकारी नहीं है।'):t('Reviewed visits will appear here.','जांची गई विज़िट यहाँ दिखेगी।')}</p>}</TabsContent>)}
- </Tabs>{!visits.some(v=>v.id===SAMPLE.id)&&<button className="secondary spaced" onClick={()=>saveVisits([{...SAMPLE,date:new Date().toISOString()},...visits])}><UserRound size={18}/>{t('Load a sample patient','एक डेमो मरीज जोड़ें')}</button>}<p className="fineprint">{t('Priority ordering demonstrates fixed rules. It is not a validated triage system.','प्राथमिकता क्रम तय नियमों का डेमो है। यह प्रमाणित ट्रायेज सिस्टम नहीं है।')}</p>
- </>}
- {screen==='case'&&editing&&<>
- <Back to="staff"/><div className="card-row"><h2 className="inner-title">{editing.name}</h2><span className="badge">{editing.status==='reviewed'?t('Reviewed','जांच हुई'):t('Draft','मसौदा')}</span></div><p className="fineprint">{editing.patientId} · {editing.age} {t('years','साल')} · {editing.mode.toUpperCase()}</p>{editing.urgent&&<div className="urgent-notice"><AlertTriangle/><p>{t('A demo safety rule matched. Assess the patient in person; no real alert was sent.','डेमो सुरक्षा नियम मिला। मरीज की खुद जांच करें; असली सूचना नहीं भेजी गई।')}</p></div>}
- <Tabs defaultValue="summary" className="staff-tabs"><TabsList className="staff-tab-list"><TabsTrigger value="summary">{t('History','इतिहास')}</TabsTrigger><TabsTrigger value="visit">{t('Consultation','परामर्श')}</TabsTrigger></TabsList><TabsContent value="summary">
- <label className="field">{t('Editable draft history','जानकारी का मसौदा — बदल सकते हैं')}<textarea rows={14} value={editing.summary} maxLength={12000} onChange={e=>setEditing({...editing,summary:e.target.value})}/></label><p className="fineprint">{t('Fixed-template summary. Original patient wording is retained; no AI diagnosis or translation is inferred.','तय प्रारूप का मसौदा। मरीज के मूल शब्द रखे गए हैं; AI निदान या अनुवाद नहीं किया गया है।')}</p>
- <details className="details-block"><summary>{t('View original answers','मूल जवाब देखें')}</summary>{getQuestions(editing.mode,editing.answers).map(q=><div className="answer-review" key={q.id}><div><small>{pair(q.title)}</small><p>{editing.answers[q.id]||t('Not provided','नहीं बताया')}</p></div></div>)}</details><label className="field">{t('Previous records · manually entered','पुराने रिकॉर्ड • स्टाफ द्वारा भरें')}<textarea rows={4} maxLength={4000} placeholder={t('Record the source, date, and relevant past history.','स्रोत, तारीख और पुरानी जानकारी भरें।')} value={editing.history} onChange={e=>setEditing({...editing,history:e.target.value})}/></label>{visits.filter(v=>v.patientId===editing.patientId&&v.id!==editing.id).map(v=><details key={v.id} className="details-block"><summary>{t('Previous visit','पिछली विज़िट')} · {new Date(v.date).toLocaleDateString()}</summary><p className="history-text">{v.summary}</p></details>)}
- </TabsContent><TabsContent value="visit">
- <label className="field">{t('Clinical examination / vitals','शारीरिक जांच / वाइटल्स')}<textarea rows={4} maxLength={4000} value={editing.notes} onChange={e=>setEditing({...editing,notes:e.target.value})} placeholder={t('Clinician-entered observations only','सिर्फ डॉक्टर की जांच से मिली जानकारी')}/></label><label className="field">{t('Diagnosis · clinician entered','निदान • डॉक्टर द्वारा भरें')}<textarea rows={2} maxLength={2000} value={editing.diagnosis} onChange={e=>setEditing({...editing,diagnosis:e.target.value})}/></label><label className="field">{t('Prescription / plan · clinician entered','दवाई / सलाह • डॉक्टर द्वारा भरें')}<textarea rows={3} maxLength={3000} value={editing.prescription} onChange={e=>setEditing({...editing,prescription:e.target.value})}/></label>
- {editing.mode==='ayush'&&<><h3 className="section-title">{t('Dashavidha Pariksha','दशविध परीक्षा')}</h3><p className="fineprint">{t('Ten fields for an Ayurvedic clinician to assess. Nothing is inferred from patient answers.','आयुर्वेद डॉक्टर की जांच के लिए दस क्षेत्र। मरीज के जवाबों से कुछ भी अनुमानित नहीं है।')}</p>{assessmentFields.map(f=><label className="field" key={f[1]}>{pair(f)}<input value={editing.assessment[f[1]]||''} maxLength={300} placeholder={t('Not assessed','जांच नहीं हुई')} onChange={e=>setEditing({...editing,assessment:{...editing.assessment,[f[1]]:e.target.value}})}/></label>)}<p className="fineprint"><a href="https://ayushportal.nic.in/pdf/ayurveda-guidelines.pdf" target="_blank" rel="noreferrer">{t('AYUSH assessment reference','आयुष जांच का संदर्भ')}</a></p></>}
- </TabsContent></Tabs>
- <label className="field">{t('Reviewer name','जांच करने वाले का नाम')}<input maxLength={80} value={editing.reviewer} onChange={e=>setEditing({...editing,reviewer:e.target.value})} placeholder={t('Demo clinician name','डेमो डॉक्टर का नाम')}/></label><label className="consent-row"><Checkbox checked={reviewed} onCheckedChange={v=>setReviewed(!!v)}/><span>{t('I have checked the history and entered notes.','मैंने जानकारी और लिखी गई टिप्पणियां जांच ली हैं।')}</span></label><button className="primary spaced" disabled={!reviewed||!editing.reviewer.trim()||!editing.summary.trim()} onClick={()=>{const next={...editing,status:'reviewed' as const};go('staff');saveVisits(visits.map(v=>v.id===next.id?next:v));setEditing(null);}}><Check size={20}/>{t('Save reviewed visit','जांची गई विज़िट सेव करें')}</button><button className="secondary spaced" onClick={()=>{saveVisits(visits.map(v=>v.id===editing.id?{...editing,status:'draft'}:v));setEditing({...editing,status:'draft'});setMessage(t('Draft saved in this browser.','मसौदा इस ब्राउज़र में सेव हुआ।'));}}>{t('Save as draft','मसौदा सेव करें')}</button><button className="text-button" onClick={()=>download({...editing,status:'draft'})}><Download size={18}/>{t('Download this record','यह रिकॉर्ड डाउनलोड करें')}</button>
- </>}
- </div><nav className="bottom-nav" aria-label={t('Main navigation','मुख्य मेनू')}><button className={!['records','help','staff','case'].includes(screen)?'active':''} aria-current={screen==='home'?'page':undefined} onClick={()=>go('home')}><Home/>{t('Home','होम')}</button><button className={screen==='records'?'active':''} aria-current={screen==='records'?'page':undefined} onClick={()=>go('records')}><FileHeart/>{t('My records','मेरे रिकॉर्ड')}</button><button className={screen==='help'?'active':''} aria-current={screen==='help'?'page':undefined} onClick={()=>go('help')}><CircleHelp/>{t('Help','मदद')}</button></nav></div><div className="home-indicator"/></div>
- <aside className="studio-right"><span className="eyebrow">DESIGNED AROUND PEOPLE</span><div className="journey-item"><b>01</b><span>Your language<small>Feel at home from the start.</small></span></div><div className="journey-item"><b>02</b><span>Your own words<small>One simple question at a time.</small></span></div><div className="journey-item"><b>03</b><span>Ready for the doctor<small>A history, reviewed by staff.</small></span></div><p className="prototype-note">Demo only · Use sample details.<br/>No real hospital is connected.</p><button className="desktop-staff" onClick={()=>go('staff')}><Stethoscope size={16}/> Explore staff desk <ArrowRight size={16}/></button></aside>
- </div><footer className="studio-footer"><span>JHARKHAND</span><span>Made for the way India speaks.</span><span>SIH 2026</span></footer></main>;
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogCancel,
+  AlertDialogAction,
+} from '@/components/ui/alert-dialog';
+import {
+  assessmentFields,
+  orderVisits,
+  needsAttention,
+  type Visit,
+  type Answers,
+} from '@/lib/intake';
+import {
+  words,
+  local,
+  languages,
+  languageNames,
+  flow,
+  cleanAnswers,
+  canonicalAnswer,
+  displayAnswer,
+  spokenAge,
+  urgentAnswer,
+  type Lang,
+  type Q,
+} from '@/lib/village';
+type Screen =
+  | 'role'
+  | 'patient'
+  | 'login'
+  | 'consent'
+  | 'setup'
+  | 'form'
+  | 'review'
+  | 'saved'
+  | 'records'
+  | 'record'
+  | 'doctor'
+  | 'case';
+type Recognition = {
+  lang: string;
+  continuous: boolean;
+  interimResults: boolean;
+  onresult:
+    | ((e: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void)
+    | null;
+  onerror: ((e: { error: string }) => void) | null;
+  onend: (() => void) | null;
+  start: () => void;
+  abort: () => void;
+  stop: () => void;
+};
+const STORE = 'medikiosk-demo-visits-v1',
+  doctors = ['DOC-101', 'DOC-102'];
+const identity = (s: string) =>
+  s
+    .toUpperCase()
+    .replace(/[\s–—]+/g, '-')
+    .replace(/-+/g, '-')
+    .trim();
+const confirmSpeech = (s: string) =>
+  /^(सही है|हाँ सही है|हां सही है|आगे|आगे बढ़ें|confirm|correct|yes|yes correct|next|ঠিক আছে|হ্যাঁ ঠিক আছে|পরের|ଠିକ୍ ଅଛି|ହଁ ଠିକ୍ ଅଛି|ଆଗକୁ)[।.!?\s]*$/i.test(
+    s.trim(),
+  );
+function draftSummary(v: Visit) {
+  return [
+    `PATIENT-REPORTED HISTORY — DRAFT`,
+    `${v.name} | ${v.age} | ${v.patientId}`,
+    `Address: ${v.address || 'Not provided'} | Doctor: ${v.doctorId || 'DOC-101'}`,
+    ...flow(v.answers, v.mode)
+      .filter((q) => v.answers[q.id])
+      .map((q) => `${q.title[1]}: ${v.answers[q.id]}`),
+    'No diagnosis inferred. Clinician review required.',
+  ].join('\n\n');
 }
-
-
+export default function MediKiosk() {
+  const [lang, setLang] = useState<Lang>('hi'),
+    [screen, setScreen] = useState<Screen>('role'),
+    [role, setRole] = useState<'patient' | 'doctor' | null>(null);
+  const [visits, setVisits] = useState<Visit[]>([]),
+    [message, setMessage] = useState(''),
+    [consent, setConsent] = useState(false),
+    [voice, setVoice] = useState(false),
+    [auto, setAuto] = useState(false);
+  const [profile, setProfile] = useState({ name: '', age: '', address: '' }),
+    [patientId, setPatientId] = useState(''),
+    [doctorId, setDoctorId] = useState('DOC-101'),
+    [loginId, setLoginId] = useState(''),
+    [lookup, setLookup] = useState('');
+  const [doctorSession,setDoctorSession]=useState(false);
+  const [mode, setMode] = useState<'opd' | 'ayush'>('opd'),
+    [answers, setAnswers] = useState<Answers>({}),
+    [field, setField] = useState('name'),
+    [value, setValue] = useState(''),
+    [reviewReturn, setReviewReturn] = useState(false);
+  const [listening, setListening] = useState(false),
+    [activeId, setActiveId] = useState(''),
+    [editing, setEditing] = useState<Visit | null>(null),
+    [checked, setChecked] = useState(false),
+    [filter, setFilter] = useState('draft'),
+    [deleting, setDeleting] = useState(false);
+  const speech = useRef<Recognition | null>(null),
+    generation = useRef(0),
+    panel = useRef<HTMLDivElement>(null),
+    confirmRef = useRef(() => {}),
+    captureRef = useRef<() => void>(() => {}),
+    voiceRef = useRef(false),
+    autoRef = useRef(false),
+    continueRef = useRef<(text: string) => void>(() => {});
+  const t = (k: keyof typeof words) => local(words[k], lang);
+  const profileQs: Q[] = [
+    { id: 'name', title: words.name },
+    { id: 'age', title: words.age },
+    { id: 'address', title: words.address },
+  ];
+  const qs = [...profileQs, ...flow(answers, mode)],
+    question = qs.find((q) => q.id === field) || qs[0];
+  const active = visits.find((v) => v.id === activeId),
+    own = visits.filter((v) => v.patientId === patientId),
+    queue = orderVisits(
+      visits.filter((v) => (v.doctorId || 'DOC-101') === doctorId),
+    );
+  voiceRef.current = voice;
+  autoRef.current = auto;
+  useEffect(() => {
+    try {
+      const data = JSON.parse(localStorage.getItem(STORE) || '[]');
+      if (Array.isArray(data))
+        setVisits(
+          data.filter(
+            (v) =>
+              v &&
+              typeof v.id === 'string' &&
+              typeof v.patientId === 'string' &&
+              v.answers &&
+              typeof v.date === 'string',
+          ),
+        );
+    } catch {
+      setMessage(local(words.storageError, 'hi'));
+    }
+  }, []);
+  useEffect(() => {
+    document.documentElement.lang = lang;
+  }, [lang]);
+  function stop() {
+    generation.current++;
+    speech.current?.abort();
+    speech.current = null;
+    if ('speechSynthesis' in window) window.speechSynthesis.cancel();
+    setListening(false);
+  }
+  function go(s: Screen) {
+    stop();
+    setMessage('');
+    setScreen(s);
+  }
+  useEffect(() => {
+    panel.current?.scrollTo({ top: 0 });
+  }, [screen, field]);
+  useEffect(
+    () => () => {
+      generation.current++;
+      speech.current?.abort();
+      if ('speechSynthesis' in window) window.speechSynthesis.cancel();
+    },
+    [],
+  );
+  function persist(next: Visit[]) {
+    try {
+      localStorage.setItem(STORE, JSON.stringify(next));
+      setVisits(next);
+      return true;
+    } catch {
+      setMessage(t('storageError'));
+      return false;
+    }
+  }
+  function read(text: string, after?: () => void) {
+    const token = ++generation.current;
+    speech.current?.abort();
+    setListening(false);
+    if (!('speechSynthesis' in window)) {
+      setMessage(t('noAudio'));
+      return;
+    }
+    window.speechSynthesis.cancel();
+    const available = window.speechSynthesis.getVoices(),
+      selected = available.find((v) => v.lang.toLowerCase().startsWith(lang));
+    if (available.length && !selected) {
+      setMessage(t('noAudio'));
+      return;
+    }
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = `${lang}-IN`;
+    if (selected) u.voice = selected;
+    u.rate = 0.85;
+    u.onend = () => {
+      if (token === generation.current) after?.();
+    };
+    u.onerror = () => {
+      if (token === generation.current) setMessage(t('noAudio'));
+    };
+    window.speechSynthesis.speak(u);
+  }
+  function capture(onText: (s: string) => void) {
+    if (!voiceRef.current) {
+      setMessage(t('voicePermission'));
+      return;
+    }
+    if (listening) {
+      stop();
+      return;
+    }
+    stop();
+    const token = generation.current;
+    const w = window as Window & {
+      SpeechRecognition?: new () => Recognition;
+      webkitSpeechRecognition?: new () => Recognition;
+    };
+    const C = w.SpeechRecognition || w.webkitSpeechRecognition;
+    if (!C) {
+      setAuto(false);
+      setMessage(t('unavailable'));
+      return;
+    }
+    const r = new C();
+    speech.current = r;
+    r.lang = `${lang}-IN`;
+    r.continuous = false;
+    r.interimResults = false;
+    r.onresult = (e) => {
+      if (token !== generation.current) return;
+      setListening(false);
+      onText(e.results[0][0].transcript);
+    };
+    r.onerror = () => {
+      if (token === generation.current) {
+        setListening(false);
+        setMessage(t('notHeard'));
+      }
+    };
+    r.onend = () => {
+      if (token === generation.current) setListening(false);
+    };
+    try {
+      r.start();
+      setListening(true);
+      setMessage('');
+    } catch {
+      setListening(false);
+      setMessage(t('notHeard'));
+    }
+  }
+  function acceptSpeech(text: string) {
+    const next =
+      field === 'age' ? spokenAge(text) : canonicalAnswer(text, question);
+    setValue(next);
+    if (autoRef.current)
+      read(`${t('check')} ${displayAnswer(next, question, lang)}`, () =>
+        captureRef.current(),
+      );
+  }
+  captureRef.current = () =>
+    capture((text) => {
+      if (confirmSpeech(text)) confirmRef.current();
+      else continueRef.current(text);
+    });
+  continueRef.current = acceptSpeech;
+  function ask() {
+    read(local(question.title, lang), () =>
+      capture((text) => continueRef.current(text)),
+    );
+  }
+  useEffect(() => {
+    if (screen === 'form' && auto && voice) {
+      const timer = setTimeout(ask, 250);
+      return () => {
+        clearTimeout(timer);
+        stop();
+      };
+    }
+  }, [screen, field, lang, auto, voice]);
+  function enterField(id: string, editingReview = false) {
+    stop();
+    setField(id);
+    setValue(
+      id in profile ? profile[id as keyof typeof profile] : answers[id] || '',
+    );
+    setReviewReturn(editingReview);
+    setScreen('form');
+  }
+  function nextAnswer() {
+    let answer = value.trim();
+    if (!answer && field !== 'address') return;
+    if (field === 'age') {
+      answer = spokenAge(answer);
+      if (!/^\d+$/.test(answer) || Number(answer) < 1 || Number(answer) > 120) {
+        setMessage(t('invalidAge'));
+        return;
+      }
+    }
+    stop();
+    setMessage('');
+    if (field in profile) {
+      setProfile((p) => ({ ...p, [field]: answer }));
+      if (reviewReturn) {
+        go('review');
+        return;
+      }
+      const i = profileQs.findIndex((q) => q.id === field);
+      enterField(i < 2 ? profileQs[i + 1].id : 'complaint');
+      return;
+    }
+    const next = cleanAnswers(
+      { ...answers, [field]: canonicalAnswer(answer, question) },
+      mode,
+    );
+    setAnswers(next);
+    if (reviewReturn) {
+      setReviewReturn(false);
+      const missing = flow(next, mode).find((q) => !next[q.id]);
+      if (!missing) {
+        go('review');
+        return;
+      }
+      setField(missing.id);
+      setValue('');
+      return;
+    }
+    const route = flow(next, mode),
+      i = route.findIndex((q) => q.id === field);
+    if (i === route.length - 1) {
+      go('review');
+      return;
+    }
+    const item = route[i + 1];
+    setField(item.id);
+    setValue(next[item.id] || '');
+  }
+  confirmRef.current = nextAnswer;
+  function newVisit() {
+    stop();
+    setConsent(false);
+    setVoice(false);
+    setAuto(false);
+    setAnswers({});
+    setMode('opd');
+    setActiveId('');
+    setReviewReturn(false);
+    if (!patientId) setProfile({ name: '', age: '', address: '' });
+    go('consent');
+  }
+  function save() {
+    const a = cleanAnswers(answers, mode);
+    if (
+      !consent ||
+      !profile.name.trim() ||
+      Number(profile.age) < 1 ||
+      Number(profile.age) > 120 ||
+      flow(a, mode).some((q) => !a[q.id])
+    )
+      return;
+    const id = crypto.randomUUID(),
+      pid = patientId || `DEMO-${id.slice(0, 6).toUpperCase()}`;
+    const v: Visit = {
+      id,
+      patientId: pid,
+      ...profile,
+      doctorId,
+      mode,
+      language: lang,
+      answers: a,
+      date: new Date().toISOString(),
+      consentAt: new Date().toISOString(),
+      status: 'draft',
+      summary: '',
+      history: '',
+      notes: '',
+      diagnosis: '',
+      prescription: '',
+      reviewer: '',
+      assessment: {},
+      urgent: urgentAnswer(a) || needsAttention(a),
+    };
+    v.summary = draftSummary(v);
+    if (persist([v, ...visits])) {
+      setPatientId(pid);
+      setActiveId(id);
+      go('saved');
+    }
+  }
+  function openPatient() {
+    const id = identity(lookup),
+      v = visits.find((v) => identity(v.patientId) === id);
+    if (!v) {
+      setMessage(t('notFound'));
+      return;
+    }
+    setPatientId(v.patientId);
+    setProfile({ name: v.name, age: v.age, address: v.address || '' });
+    setLookup('');
+    go('records');
+  }
+  function openDoctor() {
+    const id = identity(loginId);
+    if (!doctors.includes(id)) {
+      setMessage(t('demoIds'));
+      return;
+    }
+    setDoctorId(id);
+    setDoctorSession(true);
+    setLoginId('');
+    go('doctor');
+  }
+  function openRecord(v: Visit) {
+    setActiveId(v.id);
+    if (role === 'doctor') {
+      setEditing(structuredClone(v));
+      setChecked(false);
+      go('case');
+    } else go('record');
+  }
+  function download(v: Visit) {
+    const text = [
+      v.patientId,
+      v.summary,
+      v.history,
+      v.notes,
+      v.diagnosis,
+      v.prescription,
+      ...Object.entries(v.assessment).map(([k, s]) => `${k}: ${s}`),
+      v.reviewer,
+      v.status,
+    ].join('\n\n');
+    const url = URL.createObjectURL(
+        new Blob([text], { type: 'text/plain;charset=utf-8' }),
+      ),
+      a = document.createElement('a');
+    a.href = url;
+    a.download = `MediKiosk-${v.patientId}.txt`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+  function patchEdit(key: keyof Visit, v: string) {
+    if (editing) {
+      setEditing({ ...editing, [key]: v });
+      setChecked(false);
+    }
+  }
+  function dashboard() {
+    go(role === 'doctor' ? (doctorSession?'doctor':'login') : 'patient');
+  }
+  function VoiceButton({ onText }: { onText: (s: string) => void }) {
+    return (
+      <button
+        type="button"
+        className={'voice-button ' + (listening ? 'listening' : '')}
+        onClick={() => capture(onText)}
+      >
+        {listening ? <MicOff /> : <Mic />}
+        {t(listening ? 'listening' : 'talk')}
+      </button>
+    );
+  }
+  function VoiceAccess() {
+    return (
+      <label className="consent-row">
+        <Checkbox
+          checked={voice}
+          onCheckedChange={(v) => {
+            setVoice(!!v);
+            if (!v) {
+              setAuto(false);
+              stop();
+            }
+          }}
+        />
+        <span>{t('voicePermission')}</span>
+      </label>
+    );
+  }
+  function recordCards(rows: Visit[]) {
+    return rows.length ? (
+      rows.map((v) => (
+        <button
+          className={'queue-card ' + (v.urgent ? 'priority-card' : '')}
+          key={v.id}
+          onClick={() => openRecord(v)}
+        >
+          <div className="card-row">
+            <b>{v.name}</b>
+            <ArrowRight size={20} />
+          </div>
+          <small>
+            {v.patientId} · {new Date(v.date).toLocaleDateString(lang)}
+          </small>
+          <p>
+            {displayAnswer(
+              v.answers.complaint || '',
+              flow(v.answers, v.mode)[0],
+              lang,
+            )}
+          </p>
+          <span className="badge">
+            {t(v.status === 'draft' ? 'waiting' : 'done')}
+          </span>
+        </button>
+      ))
+    ) : (
+      <p className="empty-copy">{t('empty')}</p>
+    );
+  }
+  return (
+    <main className="studio village">
+      <header className="studio-bar">
+        <span className="brand">
+          <HeartPulse /> MediKiosk <span className="brand-by">Jharkhand</span>
+        </span>
+        <span className="demo-label">SIH 2026</span>
+      </header>
+      <div className="village-stage">
+        <aside className="village-aside">
+          <HeartPulse size={36} />
+          <h1>MediKiosk</h1>
+          <p>Jharkhand</p>
+          <p>{t('talk')}</p>
+          <p className="fineprint">{t('demo')}</p>
+        </aside>
+        <div className="device">
+          <div className="status-bar" aria-hidden="true">
+            <b>MediKiosk</b>
+            <span>● ● ●</span>
+          </div>
+          <div className="phone-app">
+            <header className="app-header">
+              <span className="brand">
+                <span className="brand-icon">
+                  <HeartPulse />
+                </span>
+                MediKiosk
+              </span>
+              <select
+                className="language-small"
+                aria-label={t('choose')}
+                value={lang}
+                onChange={(e) => {
+                  stop();
+                  setLang(e.target.value as Lang);
+                }}
+              >
+                {languages.map((l, i) => (
+                  <option key={l} value={l}>
+                    {languageNames[i]}
+                  </option>
+                ))}
+              </select>
+            </header>
+            <div className="page-content" ref={panel}>
+              {message && (
+                <div className="notice" role="status">
+                  {message}
+                </div>
+              )}
+              {screen === 'role' && (
+                <>
+                  <p className="clinic-line">Jharkhand · SIH 2026</p>
+                  <h2>{t('welcome')}</h2>
+                  <p className="intro">{t('choose')}</p>
+                  <RadioGroup
+                    className="language-grid"
+                    value={lang}
+                    onValueChange={(v) => {
+                      stop();
+                      setLang(v as Lang);
+                    }}
+                  >
+                    {languages.map((l, i) => (
+                      <label
+                        className={
+                          'language-card ' + (lang === l ? 'selected' : '')
+                        }
+                        key={l}
+                      >
+                        <RadioGroupItem value={l} />
+                        <span>{languageNames[i]}</span>
+                      </label>
+                    ))}
+                  </RadioGroup>
+                  <h3 className="section-title">{t('role')}</h3>
+                  <button
+                    className="role-card"
+                    onClick={() => {
+                      setRole('patient');
+                      setPatientId('');
+                      setLookup('');
+                      go('patient');
+                    }}
+                  >
+                    <UserRound />
+                    <span>{t('patient')}</span>
+                    <ArrowRight />
+                  </button>
+                  <button
+                    className="role-card"
+                    onClick={() => {
+                      setRole('doctor');
+                      setLookup('');
+                      go('login');
+                    }}
+                  >
+                    <Stethoscope />
+                    <span>{t('doctor')}</span>
+                    <ArrowRight />
+                  </button>
+                  <button
+                    className="listen-button"
+                    onClick={() =>
+                      read(`${t('role')} ${t('patient')} ${t('doctor')}`)
+                    }
+                  >
+                    <Volume2 />
+                    {t('listen')}
+                  </button>
+                  <p className="fineprint">{t('demo')}</p>
+                </>
+              )}
+              {screen === 'patient' && (
+                <>
+                  <h2>{t('dashboard')}</h2>
+                  {patientId && (
+                    <div className="patient-strip">
+                      <UserRound />
+                      <span>
+                        {profile.name}
+                        <small>{patientId}</small>
+                      </span>
+                    </div>
+                  )}
+                  <button className="role-card" onClick={newVisit}>
+                    <Plus />
+                    <span>{t('newVisit')}</span>
+                    <ArrowRight />
+                  </button>
+                  {patientId && (
+                    <button className="role-card" onClick={() => go('records')}>
+                      <FileHeart />
+                      <span>{t('records')}</span>
+                      <ArrowRight />
+                    </button>
+                  )}
+                  <label className="field">
+                    {t('patientId')}
+                    <input
+                      value={lookup}
+                      placeholder="DEMO-…"
+                      onChange={(e) => setLookup(e.target.value)}
+                    />
+                  </label>
+                  <VoiceAccess />
+                  <VoiceButton onText={setLookup} />
+                  <button
+                    className="secondary spaced"
+                    disabled={!lookup.trim()}
+                    onClick={openPatient}
+                  >
+                    {t('open')}
+                  </button>
+                  <p className="fineprint">{t('demo')}</p>
+                </>
+              )}
+              {screen === 'login' && (
+                <>
+                  <h2>{t('doctorId')}</h2>
+                  <p className="intro">{t('demoIds')}</p>
+                  <label className="field">
+                    {t('doctorId')}
+                    <input
+                      autoComplete="off"
+                      value={loginId}
+                      placeholder="DOC-101"
+                      onChange={(e) => setLoginId(e.target.value)}
+                    />
+                  </label>
+                  <button className="primary spaced" onClick={openDoctor}>
+                    {t('open')}
+                    <ArrowRight />
+                  </button>
+                </>
+              )}
+              {screen === 'consent' && (
+                <>
+                  <h2>{t('permission')}</h2>
+                  <p className="intro">{t('demo')}</p>
+                  <button
+                    className="listen-button"
+                    onClick={() =>
+                      read(`${t('demo')} ${t('agree')} ${t('voicePermission')}`)
+                    }
+                  >
+                    <Volume2 />
+                    {t('listen')}
+                  </button>
+                  <label className="consent-row">
+                    <Checkbox
+                      checked={consent}
+                      onCheckedChange={(v) => setConsent(!!v)}
+                    />
+                    {t('agree')}
+                  </label>
+                  <VoiceAccess />
+                  <label className="consent-row">
+                    <Checkbox
+                      checked={auto}
+                      disabled={!voice}
+                      onCheckedChange={(v) => setAuto(!!v)}
+                    />
+                    {t('handsfree')}
+                  </label>
+                  <p className="fineprint">{t('voiceHelp')}</p>
+                  <button
+                    className="primary spaced"
+                    disabled={!consent}
+                    onClick={() => go('setup')}
+                  >
+                    {t('next')}
+                    <ArrowRight />
+                  </button>
+                </>
+              )}
+              {screen === 'setup' && (
+                <>
+                  <h2>{t('selectDoctor')}</h2>
+                  <RadioGroup
+                    className="choice-list"
+                    value={doctorId}
+                    onValueChange={(v) => setDoctorId(String(v))}
+                  >
+                    {doctors.map((d) => (
+                      <label className="choice" key={d}>
+                        <RadioGroupItem value={d} />
+                        <Stethoscope />
+                        {d}
+                      </label>
+                    ))}
+                  </RadioGroup>
+                  <h3 className="section-title">{t('clinic')}</h3>
+                  <RadioGroup
+                    className="choice-list"
+                    value={mode}
+                    onValueChange={(v) => setMode(v as 'opd' | 'ayush')}
+                  >
+                    {(['opd', 'ayush'] as const).map((m) => (
+                      <label className="choice" key={m}>
+                        <RadioGroupItem value={m} />
+                        {t(m === 'opd' ? 'general' : 'ayush')}
+                      </label>
+                    ))}
+                  </RadioGroup>
+                  <button
+                    className="primary spaced"
+                    onClick={() => enterField('name')}
+                  >
+                    {t('next')}
+                    <ArrowRight />
+                  </button>
+                </>
+              )}
+              {screen === 'form' && (
+                <>
+                  <div className="step-top">
+                    <button
+                      className="back-link"
+                      onClick={() => {
+                        const i = qs.findIndex((q) => q.id === field);
+                        if (i > 0) enterField(qs[i - 1].id);
+                        else go('setup');
+                      }}
+                    >
+                      <ArrowLeft />
+                      {t('back')}
+                    </button>
+                    <span>
+                      {qs.findIndex((q) => q.id === field) + 1} / {qs.length}
+                    </span>
+                  </div>
+                  <h2 className="question-title">
+                    {local(question.title, lang)}
+                  </h2>
+                  <button
+                    className="listen-button"
+                    onClick={() => read(local(question.title, lang))}
+                  >
+                    <Volume2 />
+                    {t('listen')}
+                  </button>
+                  {voice && <VoiceButton onText={acceptSpeech} />}
+                  {question.choices && (
+                    <RadioGroup
+                      className="choice-list"
+                      value={value}
+                      onValueChange={(v) => {
+                        stop();
+                        setValue(String(v));
+                      }}
+                    >
+                      {question.choices.map((c) => (
+                        <label
+                          className={
+                            'choice ' + (value === c[1] ? 'selected' : '')
+                          }
+                          key={c[1]}
+                        >
+                          <RadioGroupItem value={c[1]} />
+                          {local(c, lang)}
+                        </label>
+                      ))}
+                    </RadioGroup>
+                  )}
+                  <label className="field">
+                    {t('answer')}
+                    <textarea
+                      rows={field === 'address' ? 3 : 2}
+                      maxLength={
+                        field === 'name' ? 60 : field === 'age' ? 40 : 1000
+                      }
+                      value={displayAnswer(value, question, lang)}
+                      onChange={(e) => {
+                        stop();
+                        setValue(e.target.value);
+                      }}
+                    />
+                  </label>
+                  {value && (
+                    <button
+                      className="listen-button"
+                      onClick={() => read(displayAnswer(value, question, lang))}
+                    >
+                      <Volume2 />
+                      {t('check')}
+                    </button>
+                  )}
+                  {(urgentAnswer({ ...answers, [field]: value }) ||
+                    needsAttention({ ...answers, [field]: value })) && (
+                    <div className="urgent-notice">
+                      <AlertTriangle />
+                      {t('urgent')}
+                    </div>
+                  )}
+                  <button
+                    className="primary spaced"
+                    disabled={!value.trim() && field !== 'address'}
+                    onClick={nextAnswer}
+                  >
+                    <Check />
+                    {t('next')}
+                  </button>
+                  {field === 'address' && (
+                    <button
+                      className="text-button"
+                      onClick={() => {
+                        setValue('');
+                        setProfile((p) => ({ ...p, address: '' }));
+                        if (reviewReturn) go('review');
+                        else enterField('complaint');
+                      }}
+                    >
+                      {t('optional')}
+                    </button>
+                  )}
+                  {voice && (
+                    <label className="consent-row spaced">
+                      <Checkbox
+                        checked={auto}
+                        onCheckedChange={(v) => {
+                          stop();
+                          setAuto(!!v);
+                        }}
+                      />
+                      {t('handsfree')}
+                    </label>
+                  )}
+                </>
+              )}
+              {screen === 'review' && (
+                <>
+                  <h2>{t('review')}</h2>
+                  <button
+                    className="listen-button"
+                    onClick={() =>
+                      read(
+                        qs
+                          .map(
+                            (q) =>
+                              `${local(q.title, lang)} ${q.id in profile ? profile[q.id as keyof typeof profile] : displayAnswer(answers[q.id] || '', q, lang)}`,
+                          )
+                          .join('. '),
+                      )
+                    }
+                  >
+                    <Volume2 />
+                    {t('listen')}
+                  </button>
+                  {qs.map((q) => (
+                    <div className="answer-review" key={q.id}>
+                      <div>
+                        <small>{local(q.title, lang)}</small>
+                        <p>
+                          {q.id in profile
+                            ? profile[q.id as keyof typeof profile]
+                            : displayAnswer(answers[q.id] || '', q, lang)}
+                        </p>
+                      </div>
+                      <button onClick={() => enterField(q.id, true)}>
+                        {t('edit')}
+                      </button>
+                    </div>
+                  ))}
+                  <p className="fineprint">
+                    {t('doctor')}: {doctorId}
+                  </p>
+                  <button className="primary spaced" onClick={save}>
+                    <Check />
+                    {t('save')}
+                  </button>
+                </>
+              )}
+              {screen === 'saved' && active && (
+                <>
+                  <div className="success-icon">
+                    <Check size={40} />
+                  </div>
+                  <h2>{t('saved')}</h2>
+                  <div className="ticket">
+                    <p>{t('patientId')}</p>
+                    <h3>{active.patientId}</h3>
+                    <p>{active.name}</p>
+                    <p>
+                      {t('doctor')}: {active.doctorId}
+                    </p>
+                  </div>
+                  <button className="primary" onClick={dashboard}>
+                    <Home />
+                    {t('dashboard')}
+                  </button>
+                  <button
+                    className="secondary spaced"
+                    onClick={() => go('record')}
+                  >
+                    {t('records')}
+                  </button>
+                </>
+              )}
+              {screen === 'records' && (
+                <>
+                  <h2>{t('records')}</h2>
+                  {patientId ? (
+                    <>
+                      <p className="fineprint">{patientId}</p>
+                      {recordCards(own)}
+                    </>
+                  ) : (
+                    <>
+                      <label className="field">
+                        {t('patientId')}
+                        <input
+                          value={lookup}
+                          onChange={(e) => setLookup(e.target.value)}
+                        />
+                      </label>
+                      <VoiceAccess />
+                      <VoiceButton onText={setLookup} />
+                      <button className="primary spaced" onClick={openPatient}>
+                        {t('open')}
+                      </button>
+                    </>
+                  )}
+                </>
+              )}
+              {screen === 'record' && active && (
+                <>
+                  <h2>{active.name}</h2>
+                  <p className="fineprint">
+                    {active.patientId} ·{' '}
+                    {t(active.status === 'draft' ? 'waiting' : 'done')}
+                  </p>
+                  {flow(active.answers, active.mode)
+                    .filter((q) => active.answers[q.id])
+                    .map((q) => (
+                      <div className="answer-review" key={q.id}>
+                        <div>
+                          <small>{local(q.title, lang)}</small>
+                          <p>{displayAnswer(active.answers[q.id], q, lang)}</p>
+                        </div>
+                      </div>
+                    ))}
+                  {active.status === 'reviewed' && (
+                    <div className="details-block">
+                      <h3>
+                        {t('doctor')}: {active.reviewer}
+                      </h3>
+                      <p>{active.notes}</p>
+                      <p>{active.diagnosis}</p>
+                      <p>{active.prescription}</p>
+                    </div>
+                  )}
+                  <details className="details-block"><summary>{t('summary')}</summary><p className="history-text">{active.summary}</p></details>
+                  <button
+                    className="secondary spaced"
+                    onClick={() => download(active)}
+                  >
+                    <Download />
+                    {t('download')}
+                  </button>
+                  <button
+                    className="text-button danger-text"
+                    onClick={() => setDeleting(true)}
+                  >
+                    {t('delete')}
+                  </button>
+                </>
+              )}
+              {screen === 'doctor' && (
+                <>
+                  <h2>{t('doctorDashboard')}</h2>
+                  <p className="intro">{doctorId}</p>
+                  <div className="queue-count">
+                    <span>
+                      {queue.filter((v) => v.status === 'draft').length}
+                      <small>{t('waiting')}</small>
+                    </span>
+                    <span>
+                      {queue.filter((v) => v.status === 'reviewed').length}
+                      <small>{t('done')}</small>
+                    </span>
+                  </div>
+                  <label className="field">
+                    {t('search')}
+                    <input
+                      value={lookup}
+                      placeholder="DEMO-…"
+                      onChange={(e) => setLookup(e.target.value)}
+                    />
+                  </label>
+                  <div className="filter-row">
+                    {['draft', 'reviewed', 'all'].map((f) => (
+                      <button
+                        key={f}
+                        aria-pressed={filter === f}
+                        onClick={() => setFilter(f)}
+                      >
+                        {t(
+                          f === 'draft'
+                            ? 'waiting'
+                            : f === 'reviewed'
+                              ? 'done'
+                              : 'all',
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                  {recordCards(
+                    queue.filter(
+                      (v) =>
+                        (filter === 'all' || v.status === filter) &&
+                        (!lookup.trim() ||
+                          identity(v.patientId).includes(identity(lookup))),
+                    ),
+                  )}
+                  <button
+                    className="secondary spaced"
+                    onClick={() => {
+                      const id = crypto.randomUUID();
+                      const v: Visit = {
+                        id,
+                        patientId: `DEMO-${id.slice(0, 6).toUpperCase()}`,
+                        name: 'Meena Devi',
+                        age: '42',
+                        address: 'Sample village',
+                        doctorId,
+                        language: lang,
+                        mode: 'opd',
+                        answers: {
+                          complaint: 'Stomach pain',
+                          safety: 'No',
+                          onset: 'Today',
+                          stomach_site: 'Upper abdomen',
+                          vomiting: 'No',
+                        },
+                        date: new Date().toISOString(),
+                        consentAt: new Date().toISOString(),
+                        status: 'draft',
+                        summary: '',
+                        history: '',
+                        notes: '',
+                        diagnosis: '',
+                        prescription: '',
+                        reviewer: '',
+                        assessment: {},
+                        urgent: false,
+                      };
+                      v.summary = draftSummary(v);
+                      persist([v, ...visits]);
+                    }}
+                  >
+                    <Plus />
+                    {t('sample')}
+                  </button>
+                  <p className="fineprint">{t('demoIds')}</p>
+                </>
+              )}
+              {screen === 'case' && editing && (
+                <>
+                  <button className="back-link" onClick={() => go('doctor')}>
+                    <ArrowLeft />
+                    {t('doctorDashboard')}
+                  </button>
+                  <h2>{editing.name}</h2>
+                  <p className="fineprint">
+                    {editing.patientId} · {editing.age} · {editing.address}
+                  </p>
+                  {editing.urgent && (
+                    <div className="urgent-notice">
+                      <AlertTriangle />
+                      {t('urgent')}
+                    </div>
+                  )}
+                  <label className="field">
+                    {t('summary')}
+                    <textarea
+                      rows={10}
+                      value={editing.summary}
+                      onChange={(e) => patchEdit('summary', e.target.value)}
+                    />
+                  </label>
+                  <details className="details-block">
+                    <summary>{t('answer')}</summary>
+                    {flow(editing.answers, editing.mode)
+                      .filter((q) => editing.answers[q.id])
+                      .map((q) => (
+                        <p key={q.id}>
+                          {local(q.title, lang)}:{' '}
+                          {displayAnswer(editing.answers[q.id], q, lang)}
+                        </p>
+                      ))}
+                  </details>
+                  <label className="field">
+                    {t('history')}
+                    <textarea
+                      value={editing.history}
+                      onChange={(e) => patchEdit('history', e.target.value)}
+                    />
+                  </label>
+                  {queue
+                    .filter(
+                      (v) =>
+                        v.patientId === editing.patientId &&
+                        v.id !== editing.id,
+                    )
+                    .map((v) => (
+                      <details className="details-block" key={v.id}>
+                        <summary>
+                          {new Date(v.date).toLocaleDateString(lang)}
+                        </summary>
+                        <p className="history-text">{v.summary}</p>
+                      </details>
+                    ))}
+                  {(['notes', 'diagnosis', 'prescription'] as const).map(
+                    (k) => (
+                      <label className="field" key={k}>
+                        {t(k)}
+                        <textarea
+                          rows={3}
+                          value={editing[k]}
+                          onChange={(e) => patchEdit(k, e.target.value)}
+                        />
+                      </label>
+                    ),
+                  )}
+                  {editing.mode === 'ayush' &&
+                    assessmentFields.map((f) => (
+                      <label className="field" key={f[1]}>
+                        {lang === 'hi' ? f[0] : f[1]}
+                        <input
+                          value={editing.assessment[f[1]] || ''}
+                          onChange={(e) => {
+                            setEditing({
+                              ...editing,
+                              assessment: {
+                                ...editing.assessment,
+                                [f[1]]: e.target.value,
+                              },
+                            });
+                            setChecked(false);
+                          }}
+                        />
+                      </label>
+                    ))}
+                  <label className="consent-row spaced">
+                    <Checkbox
+                      checked={checked}
+                      onCheckedChange={(v) => setChecked(!!v)}
+                    />
+                    {t('checked')}
+                  </label>
+                  <button
+                    className="primary spaced"
+                    disabled={!checked || !editing.summary.trim()}
+                    onClick={() => {
+                      const v = {
+                        ...editing,
+                        status: 'reviewed' as const,
+                        reviewer: doctorId,
+                      };
+                      if (persist(visits.map((x) => (x.id === v.id ? v : x)))) {
+                        setEditing(null);
+                        go('doctor');
+                      }
+                    }}
+                  >
+                    <Check />
+                    {t('save')}
+                  </button>
+                  <button
+                    className="secondary spaced"
+                    onClick={() => {
+                      const v = {
+                        ...editing,
+                        status: 'draft' as const,
+                        reviewer: '',
+                      };
+                      if (persist(visits.map((x) => (x.id === v.id ? v : x))))
+                        go('doctor');
+                    }}
+                  >
+                    {t('summary')} · {t('save')}
+                  </button>
+                </>
+              )}
+            </div>
+            {role && (
+              <nav className="bottom-nav">
+                <button onClick={dashboard}>
+                  <Home />
+                  {t(role === 'doctor' ? 'doctorDashboard' : 'dashboard')}
+                </button>
+                {role === 'patient' && (
+                  <button onClick={() => go('records')}>
+                    <FileHeart />
+                    {t('records')}
+                  </button>
+                )}
+                <button
+                  onClick={() => {
+                    setRole(null);
+                    setDoctorSession(false);
+                    setEditing(null);
+                    setLookup('');
+                    setPatientId('');
+                    setVoice(false);
+                    setAuto(false);
+                    go('role');
+                  }}
+                >
+                  <LogOut />
+                  {t('logout')}
+                </button>
+              </nav>
+            )}
+          </div>
+          <div className="home-indicator" />
+        </div>
+      </div>
+      <AlertDialog open={deleting} onOpenChange={setDeleting}>
+        <AlertDialogContent className="delete-dialog">
+          <AlertDialogTitle>{t('delete')}</AlertDialogTitle>
+          <AlertDialogDescription>{t('deleteConfirm')}</AlertDialogDescription>
+          <AlertDialogCancel>{t('cancel')}</AlertDialogCancel>
+          <AlertDialogAction
+            onClick={() => {
+              if (persist(visits.filter((v) => v.id !== activeId))) {
+                setActiveId('');
+                go('records');
+              }
+            }}
+          >
+            {t('delete')}
+          </AlertDialogAction>
+        </AlertDialogContent>
+      </AlertDialog>
+    </main>
+  );
+}
