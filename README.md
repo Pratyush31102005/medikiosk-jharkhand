@@ -32,6 +32,14 @@ The GitHub Pages build uses the existing patient interface through a standalone 
 
 ## Tests and deployment
 
+### Vercel
+
+Import this repository with the repository root as the Root Directory and `main` as the production branch. The root `vercel.json` selects the static build (`npm run build:pages`) and publishes `dist-pages`. It overrides framework detection and dashboard build/output settings. No environment variables or server functions are needed for this prototype.
+
+Do not use the default `npm run build` for Vercel: it builds the original Cloudflare Worker version rather than this standalone static app. After pushing changes, open the new deployment's production URL. An older deployment-specific URL continues to show its original build. If a preview URL asks for Vercel sign-in, that is the project's Deployment Protection setting, separate from the app build.
+
+### GitHub Pages
+
 ```sh
 npm run test:pages
 ```
